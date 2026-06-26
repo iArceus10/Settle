@@ -24,8 +24,8 @@ export async function computeBalances(groupId: string) {
     for (const split of expense.splits) {
       // Find the LATEST confirmation for this member and this expense
       const memberConfirms = expense.confirmations
-        .filter(c => c.member_id === split.member_id)
-        .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+        .filter((c: any) => c.member_id === split.member_id)
+        .sort((a: any, b: any) => b.created_at.getTime() - a.created_at.getTime());
       
       const latestConfirm = memberConfirms[0];
       if (!latestConfirm || latestConfirm.status !== 'confirmed') {

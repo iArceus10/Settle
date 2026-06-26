@@ -1,16 +1,23 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
 
-router.post('/:id/confirm', async (req, res) => {
+router.post('/:id/confirm', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { member_id } = req.body;
+    const authReq = req as AuthRequest;
     
-    // We insert a new ExpenseConfirmation row with status "confirmed"
+    // Security Fix: verify ownership
+    const member = await prisma.member.findUnique({ where: { id: member_id }});
+    if (!member || member.user_id !== authReq.user?.id) {
+       res.status(403).json({ error: 'Unauthorized to confirm for this member' });
+       return;
+    }
+
     const conf = await prisma.expenseConfirmation.create({
       data: {
         expense_id: id,
@@ -25,10 +32,18 @@ router.post('/:id/confirm', async (req, res) => {
   }
 });
 
-router.post('/:id/dispute', async (req, res) => {
+router.post('/:id/dispute', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { member_id } = req.body;
+    const authReq = req as AuthRequest;
+
+    // Security Fix: verify ownership
+    const member = await prisma.member.findUnique({ where: { id: member_id }});
+    if (!member || member.user_id !== authReq.user?.id) {
+       res.status(403).json({ error: 'Unauthorized to dispute for this member' });
+       return;
+    }
 
     const conf = await prisma.expenseConfirmation.create({
       data: {
