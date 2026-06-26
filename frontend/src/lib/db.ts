@@ -3,13 +3,13 @@ import Dexie, { Table } from 'dexie';
 export interface LocalExpense {
   id: string;
   group_id: string;
-  paid_by: string;
+  paid_by: string;        // member_id of payer
   amount: number;
   description: string;
   created_at: string;
   origin_device: string | null;
   supersedes_expense_id: string | null;
-  synced?: boolean;
+  synced: boolean;        // required (not optional) — always set explicitly
 }
 
 export interface LocalExpenseSplit {
@@ -23,9 +23,9 @@ export interface LocalExpenseConfirmation {
   id: string;
   expense_id: string;
   member_id: string;
-  status: string;
+  status: 'pending' | 'confirmed' | 'disputed';  // typed enum
   created_at: string;
-  synced?: boolean;
+  synced: boolean;        // required — always set explicitly
 }
 
 export interface LocalGroup {
@@ -51,10 +51,10 @@ export class SplitwiseDB extends Dexie {
     super('SplitwiseDB');
     this.version(1).stores({
       expenses: 'id, group_id, synced',
-      expenseSplits: 'id, expense_id',
-      expenseConfirmations: 'id, expense_id, synced',
+      expenseSplits: 'id, expense_id, member_id',
+      expenseConfirmations: 'id, expense_id, member_id, synced',
       groups: 'id',
-      members: 'id, group_id',
+      members: 'id, group_id, user_id',  // Bug fix: index user_id for fast lookup
     });
   }
 }

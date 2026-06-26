@@ -2,8 +2,9 @@ import { db } from './db';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export async function syncGroup(groupId: string, token: string) {
+export async function syncGroup(groupId: string, token: string): Promise<boolean> {
   try {
+    // Collect unsynced expenses for this specific group
     const allExpenses = await db.expenses.where({ group_id: groupId }).toArray();
     const localExpensesToSync = allExpenses.filter(e => e.synced === false);
 
@@ -14,14 +15,18 @@ export async function syncGroup(groupId: string, token: string) {
       })
     );
 
+    // Bug fix: scope confirmations to THIS group's expenses only, not all groups
+    const groupExpenseIds = new Set(allExpenses.map(e => e.id));
     const allConfirms = await db.expenseConfirmations.toArray();
-    const localConfirmationsToSync = allConfirms.filter(c => c.synced === false);
+    const localConfirmationsToSync = allConfirms.filter(
+      c => c.synced === false && groupExpenseIds.has(c.expense_id)
+    );
 
     const response = await fetch(`${API_URL}/groups/${groupId}/sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
       },
       body: JSON.stringify({
         local_expenses: expensesWithSplits,
@@ -29,12 +34,17 @@ export async function syncGroup(groupId: string, token: string) {
       }),
     });
 
-    if (!response.ok) throw new Error('Sync failed');
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      console.error('Sync rejected by server:', errData);
+      return false;
+    }
 
     const data = await response.json();
-    const serverExpenses = data.expenses;
-    const serverConfirmations = data.confirmations;
+    const serverExpenses: any[] = data.expenses ?? [];
+    const serverConfirmations: any[] = data.confirmations ?? [];
 
+    // Write everything in a single Dexie transaction for atomicity
     await db.transaction('rw', db.expenses, db.expenseSplits, db.expenseConfirmations, async () => {
       // Mark our sent items as synced
       for (const e of localExpensesToSync) {
@@ -44,7 +54,7 @@ export async function syncGroup(groupId: string, token: string) {
         await db.expenseConfirmations.update(c.id, { synced: true });
       }
 
-      // Upsert server expenses
+      // Upsert server expenses into local DB
       for (const se of serverExpenses) {
         await db.expenses.put({
           id: se.id,
@@ -53,13 +63,12 @@ export async function syncGroup(groupId: string, token: string) {
           amount: Number(se.amount),
           description: se.description,
           created_at: se.created_at,
-          origin_device: se.origin_device,
-          supersedes_expense_id: se.supersedes_expense_id,
+          origin_device: se.origin_device ?? null,
+          supersedes_expense_id: se.supersedes_expense_id ?? null,
           synced: true,
         });
 
-        // Upsert splits
-        for (const sp of se.splits) {
+        for (const sp of se.splits ?? []) {
           await db.expenseSplits.put({
             id: sp.id,
             expense_id: sp.expense_id,
@@ -84,7 +93,7 @@ export async function syncGroup(groupId: string, token: string) {
 
     return true;
   } catch (err) {
-    console.error(err);
+    console.error('Sync error:', err);
     return false;
   }
 }

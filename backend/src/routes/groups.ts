@@ -24,7 +24,26 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// add member
+// GET members of a group
+router.get('/:id/members', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+    const authReq = req as AuthRequest;
+
+    const me = await getMemberForUser(id, authReq.user!.id);
+    if (!me) {
+      res.status(403).json({ error: 'Not a member of this group' });
+      return;
+    }
+
+    const members = await prisma.member.findMany({ where: { group_id: id } });
+    res.json(members);
+  } catch (err) {
+    res.status(400).json({ error: 'Invalid request' });
+  }
+});
+
+// add member (self-join only)
 router.post('/:id/members', async (req: Request, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
