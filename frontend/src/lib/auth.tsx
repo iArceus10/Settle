@@ -1,5 +1,5 @@
 'use client';
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface User {
@@ -17,18 +17,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const router = useRouter();
-
-  useEffect(() => {
-    const storedToken = localStorage.getItem('token');
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
     const storedUser = localStorage.getItem('user');
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
+    if (!storedUser) return null;
+    try {
+      return JSON.parse(storedUser) as User;
+    } catch {
+      localStorage.removeItem('user');
+      return null;
     }
-  }, []);
+  });
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('token');
+  });
+  const router = useRouter();
 
   const login = (newToken: string, newUser: User) => {
     localStorage.setItem('token', newToken);

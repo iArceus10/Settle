@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "ts-node src/server.ts",
+    "start": "ts-node src/server.ts",
+    "test": "powershell -ExecutionPolicy Bypass -File test-security.ps1"
   },
   "keywords": [],
   "author": "",

@@ -18,11 +18,14 @@ export default function Login() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      if (!res.ok) throw new Error('Login failed');
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Login failed');
+      }
       const data = await res.json();
       login(data.token, data.user);
     } catch (err) {
-      alert('Login failed');
+      alert(err instanceof Error ? err.message : 'Login failed');
     }
   };
 
@@ -39,7 +42,7 @@ export default function Login() {
           <button type="submit" className="btn-primary w-full mt-4">Sign In</button>
         </form>
         <div className="text-center text-sm text-gray-400">
-          Don't have an account? <Link href="/signup" className="text-blue-400 hover:text-blue-300">Sign Up</Link>
+          Don&apos;t have an account? <Link href="/signup" className="text-blue-400 hover:text-blue-300">Sign Up</Link>
         </div>
       </div>
     </motion.div>

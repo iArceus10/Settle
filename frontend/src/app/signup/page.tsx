@@ -18,11 +18,14 @@ export default function Signup() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      if (!res.ok) throw new Error('Signup failed');
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || 'Signup failed');
+      }
       const data = await res.json();
       login(data.token, data.user);
     } catch (err) {
-      alert('Signup failed');
+      alert(err instanceof Error ? err.message : 'Signup failed');
     }
   };
 

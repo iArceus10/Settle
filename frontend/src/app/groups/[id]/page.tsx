@@ -8,6 +8,17 @@ import { motion } from 'framer-motion';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+function splitAmountEvenly(amount: number, memberCount: number): number[] {
+  const totalCents = Math.round(amount * 100);
+  const baseCents = Math.floor(totalCents / memberCount);
+  const remainder = totalCents % memberCount;
+
+  return Array.from({ length: memberCount }, (_, index) => {
+    const cents = baseCents + (index < remainder ? 1 : 0);
+    return cents / 100;
+  });
+}
+
 export default function GroupDetails({ params }: { params: Promise<{ id: string }> }) {
   const { user, token } = useAuth();
   const router = useRouter();
@@ -143,7 +154,7 @@ export default function GroupDetails({ params }: { params: Promise<{ id: string 
     }
 
     const newExpId = crypto.randomUUID();
-    const sharePerMember = parseFloat((amount / currentMembers.length).toFixed(2));
+    const shares = splitAmountEvenly(amount, currentMembers.length);
 
     await db.expenses.put({
       id: newExpId,
@@ -157,12 +168,12 @@ export default function GroupDetails({ params }: { params: Promise<{ id: string 
       synced: false,
     });
 
-    for (const m of currentMembers) {
+    for (const [index, m] of currentMembers.entries()) {
       await db.expenseSplits.put({
         id: crypto.randomUUID(),
         expense_id: newExpId,
         member_id: m.id,
-        share: sharePerMember,
+        share: shares[index],
       });
       await db.expenseConfirmations.put({
         id: crypto.randomUUID(),

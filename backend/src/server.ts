@@ -1,12 +1,9 @@
+import './loadEnv';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
 import groupsRoutes from './routes/groups';
 import expensesRoutes from './routes/expenses';
-
-// Load .env FIRST before anything else reads process.env
-dotenv.config();
 
 const app = express();
 

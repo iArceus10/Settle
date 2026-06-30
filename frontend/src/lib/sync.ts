@@ -2,6 +2,33 @@ import { db } from './db';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+interface ServerExpenseSplit {
+  id: string;
+  expense_id: string;
+  member_id: string;
+  share: number | string;
+}
+
+interface ServerExpense {
+  id: string;
+  group_id: string;
+  paid_by: string;
+  amount: number | string;
+  description: string;
+  created_at: string;
+  origin_device?: string | null;
+  supersedes_expense_id?: string | null;
+  splits?: ServerExpenseSplit[];
+}
+
+interface ServerConfirmation {
+  id: string;
+  expense_id: string;
+  member_id: string;
+  status: 'pending' | 'confirmed' | 'disputed';
+  created_at: string;
+}
+
 export async function syncGroup(groupId: string, token: string): Promise<boolean> {
   try {
     // Collect unsynced expenses for this specific group
@@ -41,8 +68,8 @@ export async function syncGroup(groupId: string, token: string): Promise<boolean
     }
 
     const data = await response.json();
-    const serverExpenses: any[] = data.expenses ?? [];
-    const serverConfirmations: any[] = data.confirmations ?? [];
+    const serverExpenses: ServerExpense[] = data.expenses ?? [];
+    const serverConfirmations: ServerConfirmation[] = data.confirmations ?? [];
 
     // Write everything in a single Dexie transaction for atomicity
     await db.transaction('rw', db.expenses, db.expenseSplits, db.expenseConfirmations, async () => {

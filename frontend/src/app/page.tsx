@@ -1,8 +1,8 @@
 'use client';
 import { useAuth } from '@/lib/auth';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { db, LocalGroup } from '@/lib/db';
+import { db, LocalGroup, LocalMember } from '@/lib/db';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 
@@ -11,18 +11,21 @@ export default function Dashboard() {
   const router = useRouter();
   const [groups, setGroups] = useState<LocalGroup[]>([]);
 
+  const loadGroups = useCallback(async () => {
+    const local = await db.groups.toArray();
+    setGroups(local);
+  }, []);
+
   useEffect(() => {
     if (!token) {
       router.push('/login');
       return;
     }
-    loadGroups();
-  }, [token, router]);
-
-  const loadGroups = async () => {
-    const local = await db.groups.toArray();
-    setGroups(local);
-  };
+    const timer = window.setTimeout(() => {
+      void loadGroups();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [token, router, loadGroups]);
 
   const createGroup = async () => {
     const name = prompt('Group Name:');
@@ -32,12 +35,16 @@ export default function Dashboard() {
       const res = await fetch(`${API_URL}/groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, member_name: user?.email.split('@')[0] })
       });
+      if (!res.ok) throw new Error('Create group failed');
       const data = await res.json();
       await db.groups.put({ id: data.id, name: data.name });
+      if (data.member) {
+        await db.members.put(data.member as LocalMember);
+      }
       loadGroups();
-    } catch(err) {
+    } catch {
       alert('Failed to create group');
     }
   };
