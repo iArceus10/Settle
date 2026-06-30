@@ -13,6 +13,8 @@ import {
 const router = Router();
 router.use(authenticate);
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
 async function requireGroupMember(
   req: Request,
   res: Response
@@ -27,27 +29,27 @@ async function requireGroupMember(
   return { groupId, me };
 }
 
-// list groups for the authenticated user
+// ─── Groups ──────────────────────────────────────────────────────────────────
+
+// GET /groups — returns only groups the authenticated user is a member of
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const authReq = req as AuthRequest;
     const memberships = await prisma.member.findMany({
       where: { user_id: authReq.user!.id },
     });
-
     const groups = await Promise.all(
-      memberships.map(async (member: { group_id: string }) => (
-        prisma.group.findUnique({ where: { id: member.group_id } })
-      ))
+      memberships.map((m: { group_id: string }) =>
+        prisma.group.findUnique({ where: { id: m.group_id } })
+      )
     );
-
     res.json(groups.filter(Boolean));
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// create group
+// POST /groups — create group, auto-add creator as member
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const { name, member_name } = req.body;
@@ -71,24 +73,25 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
 
     res.json(result);
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET members of a group
+// ─── Members ─────────────────────────────────────────────────────────────────
+
+// GET /groups/:id/members
 router.get('/:id/members', async (req: Request, res: Response): Promise<void> => {
   try {
     const ctx = await requireGroupMember(req, res);
     if (!ctx) return;
-
     const members = await prisma.member.findMany({ where: { group_id: ctx.groupId } });
     res.json(members);
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// add member (self-join only)
+// POST /groups/:id/members — self-join only
 router.post('/:id/members', async (req: Request, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
@@ -99,7 +102,6 @@ router.post('/:id/members', async (req: Request, res: Response): Promise<void> =
       res.status(400).json({ error: 'Member name is required' });
       return;
     }
-
     if (user_id !== authReq.user?.id) {
       res.status(403).json({ error: 'You can only add yourself to a group' });
       return;
@@ -111,6 +113,7 @@ router.post('/:id/members', async (req: Request, res: Response): Promise<void> =
       return;
     }
 
+    // Idempotent: if already a member, return existing record
     const existing = await getMemberForUser(id, authReq.user!.id);
     if (existing) {
       res.json(existing);
@@ -118,19 +121,17 @@ router.post('/:id/members', async (req: Request, res: Response): Promise<void> =
     }
 
     const member = await prisma.member.create({
-      data: {
-        group_id: id,
-        name: name.trim(),
-        user_id,
-      },
+      data: { group_id: id, name: name.trim(), user_id },
     });
     res.json(member);
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// GET group expenses
+// ─── Expenses ────────────────────────────────────────────────────────────────
+
+// GET /groups/:id/expenses
 router.get('/:id/expenses', async (req: Request, res: Response): Promise<void> => {
   try {
     const ctx = await requireGroupMember(req, res);
@@ -143,24 +144,15 @@ router.get('/:id/expenses', async (req: Request, res: Response): Promise<void> =
     });
     res.json(expenses);
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// create expense
+// POST /groups/:id/expenses
 router.post('/:id/expenses', async (req: Request, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
-    const {
-      id: expense_id,
-      paid_by,
-      amount,
-      description,
-      splits,
-      origin_device,
-      supersedes_expense_id,
-      created_at,
-    } = req.body;
+    const { id: expense_id, paid_by, amount, description, splits, origin_device, supersedes_expense_id, created_at } = req.body;
     const authReq = req as AuthRequest;
 
     const me = await getMemberForUser(id, authReq.user!.id);
@@ -197,20 +189,11 @@ router.post('/:id/expenses', async (req: Request, res: Response): Promise<void> 
 
       for (const split of splits) {
         await tx.expenseSplit.create({
-          data: {
-            expense_id: expense.id,
-            member_id: split.member_id,
-            share: split.share,
-          },
+          data: { expense_id: expense.id, member_id: split.member_id, share: split.share },
         });
-
         const status = split.member_id === me.id ? 'confirmed' : 'pending';
         await tx.expenseConfirmation.create({
-          data: {
-            expense_id: expense.id,
-            member_id: split.member_id,
-            status,
-          },
+          data: { expense_id: expense.id, member_id: split.member_id, status },
         });
       }
       return expense;
@@ -218,15 +201,17 @@ router.post('/:id/expenses', async (req: Request, res: Response): Promise<void> 
 
     res.json(result);
   } catch (_err) {
-    res.status(400).json({ error: 'Invalid request' });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// POST sync endpoint
+// ─── Sync ─────────────────────────────────────────────────────────────────────
+
+// POST /groups/:id/sync
 router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
   try {
     const group_id = req.params.id as string;
-    const { local_expenses = [], local_confirmations = [] } = req.body;
+    const { local_expenses = [], local_confirmations = [], local_settlements = [] } = req.body;
     const authReq = req as AuthRequest;
 
     const me = await getMemberForUser(group_id, authReq.user!.id);
@@ -235,64 +220,39 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Merge expenses
     for (const exp of local_expenses) {
       const exists = await prisma.expense.findUnique({ where: { id: exp.id } });
       if (exists) {
         if (exists.group_id !== group_id) {
-          res.status(400).json({ error: 'Expense id already exists in another group' });
+          res.status(400).json({ error: 'Expense id exists in another group' });
           return;
         }
         continue;
       }
 
-      const participantCheck = await validateExpenseParticipants(
-        group_id,
-        exp.paid_by,
-        exp.splits,
-        Number(exp.amount),
-        me.id
-      );
-      if (!participantCheck.valid) {
-        res.status(400).json({ error: participantCheck.error });
-        return;
-      }
+      const pCheck = await validateExpenseParticipants(group_id, exp.paid_by, exp.splits, Number(exp.amount), me.id);
+      if (!pCheck.valid) { res.status(400).json({ error: pCheck.error }); return; }
 
-      const supersedesCheck = await validateSupersedesExpense(
-        group_id,
-        exp.supersedes_expense_id
-      );
-      if (!supersedesCheck.valid) {
-        res.status(400).json({ error: supersedesCheck.error });
-        return;
-      }
+      const sCheck = await validateSupersedesExpense(group_id, exp.supersedes_expense_id);
+      if (!sCheck.valid) { res.status(400).json({ error: sCheck.error }); return; }
 
       await prisma.$transaction(async (tx: any) => {
         await tx.expense.create({
           data: {
-            id: exp.id,
-            group_id,
-            paid_by: exp.paid_by,
-            amount: exp.amount,
-            description: exp.description,
-            origin_device: exp.origin_device,
+            id: exp.id, group_id, paid_by: exp.paid_by, amount: exp.amount,
+            description: exp.description, origin_device: exp.origin_device,
             supersedes_expense_id: exp.supersedes_expense_id,
             created_at: exp.created_at ? new Date(exp.created_at) : new Date(),
           },
         });
-
         for (const split of exp.splits) {
           await tx.expenseSplit.create({
-            data: {
-              expense_id: exp.id,
-              member_id: split.member_id,
-              share: split.share,
-            },
+            data: { expense_id: exp.id, member_id: split.member_id, share: split.share },
           });
-
           await tx.expenseConfirmation.create({
             data: {
-              expense_id: exp.id,
-              member_id: split.member_id,
+              expense_id: exp.id, member_id: split.member_id,
               status: split.member_id === me.id ? 'confirmed' : 'pending',
               created_at: exp.created_at ? new Date(exp.created_at) : new Date(),
             },
@@ -301,65 +261,70 @@ router.post('/:id/sync', async (req: Request, res: Response): Promise<void> => {
       });
     }
 
+    // Merge confirmations (only for the authenticated user's member)
     for (const conf of local_confirmations) {
-      if (conf.member_id !== me.id) {
-        continue;
-      }
+      if (conf.member_id !== me.id) continue; // spoofing guard
 
       if (!isConfirmationStatus(conf.status)) {
-        res.status(400).json({ error: 'Invalid confirmation status' });
-        return;
+        res.status(400).json({ error: 'Invalid confirmation status' }); return;
       }
 
-      const confirmationCheck = await validateSyncedConfirmation(
-        group_id,
-        conf.expense_id,
-        conf.member_id
-      );
-      if (!confirmationCheck.valid) {
-        res.status(400).json({ error: confirmationCheck.error });
-        return;
-      }
+      const cCheck = await validateSyncedConfirmation(group_id, conf.expense_id, conf.member_id);
+      if (!cCheck.valid) { res.status(400).json({ error: cCheck.error }); return; }
 
-      const exists = await prisma.expenseConfirmation.findUnique({
-        where: { id: conf.id },
-      });
+      const exists = await prisma.expenseConfirmation.findUnique({ where: { id: conf.id } });
       if (!exists) {
         await prisma.expenseConfirmation.create({
+          data: { id: conf.id, expense_id: conf.expense_id, member_id: conf.member_id, status: conf.status, created_at: new Date(conf.created_at) },
+        });
+      }
+    }
+
+    // Merge settlements (only from_member_id === me.id)
+    for (const s of local_settlements) {
+      if (s.from_member_id !== me.id) continue; // spoofing guard
+
+      // Validate to_member belongs to this group
+      const toMember = await prisma.member.findUnique({ where: { id: s.to_member_id } });
+      if (!toMember || toMember.group_id !== group_id) continue;
+
+      const exists = await prisma.settlement.findUnique({ where: { id: s.id } });
+      if (!exists) {
+        await prisma.settlement.create({
           data: {
-            id: conf.id,
-            expense_id: conf.expense_id,
-            member_id: conf.member_id,
-            status: conf.status,
-            created_at: new Date(conf.created_at),
+            id: s.id, group_id, from_member_id: s.from_member_id,
+            to_member_id: s.to_member_id, amount: s.amount,
+            created_at: s.created_at ? new Date(s.created_at) : new Date(),
           },
         });
       }
     }
 
+    // Return full server state for this group
     const expenses = await prisma.expense.findMany({
-      where: { group_id },
-      include: { splits: true },
+      where: { group_id }, include: { splits: true },
     });
     const confirmations = await prisma.expenseConfirmation.findMany({
       where: { expense: { group_id } },
     });
+    const settlements = await prisma.settlement.findMany({ where: { group_id } });
 
-    res.json({ expenses, confirmations });
+    res.json({ expenses, confirmations, settlements });
   } catch (_err) {
-    res.status(400).json({ error: 'Sync failed' });
+    res.status(500).json({ error: 'Sync failed' });
   }
 });
+
+// ─── Balances & Settlements ───────────────────────────────────────────────────
 
 router.get('/:id/balances', async (req: Request, res: Response): Promise<void> => {
   try {
     const ctx = await requireGroupMember(req, res);
     if (!ctx) return;
-
     const balances = await computeBalances(ctx.groupId);
     res.json(balances);
   } catch (_err) {
-    res.status(400).json({ error: 'Failed' });
+    res.status(500).json({ error: 'Failed' });
   }
 });
 
@@ -367,12 +332,68 @@ router.get('/:id/settlements', async (req: Request, res: Response): Promise<void
   try {
     const ctx = await requireGroupMember(req, res);
     if (!ctx) return;
-
     const balances = await computeBalances(ctx.groupId);
-    const settlements = computeSettlements(balances);
-    res.json(settlements);
+    const suggestions = computeSettlements(balances);
+    res.json(suggestions);
   } catch (_err) {
-    res.status(400).json({ error: 'Failed' });
+    res.status(500).json({ error: 'Failed' });
+  }
+});
+
+// POST /groups/:id/settlements/pay — record a payment
+router.post('/:id/settlements/pay', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const ctx = await requireGroupMember(req, res);
+    if (!ctx) return;
+
+    const { id: settlement_id, from_member_id, to_member_id, amount, created_at } = req.body;
+
+    if (from_member_id !== ctx.me.id) {
+      res.status(403).json({ error: 'You can only record payments from yourself' });
+      return;
+    }
+
+    const toMember = await prisma.member.findUnique({ where: { id: to_member_id } });
+    if (!toMember || toMember.group_id !== ctx.groupId) {
+      res.status(400).json({ error: 'Recipient is not in this group' });
+      return;
+    }
+
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      res.status(400).json({ error: 'Amount must be a positive number' });
+      return;
+    }
+
+    const settlement = await prisma.settlement.create({
+      data: {
+        id: settlement_id,
+        group_id: ctx.groupId,
+        from_member_id,
+        to_member_id,
+        amount: Number(amount),
+        created_at: created_at ? new Date(created_at) : new Date(),
+      },
+    });
+
+    res.status(201).json(settlement);
+  } catch (_err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /groups/:id/settlements/history — all payment records
+router.get('/:id/settlements/history', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const ctx = await requireGroupMember(req, res);
+    if (!ctx) return;
+
+    const history = await prisma.settlement.findMany({
+      where: { group_id: ctx.groupId },
+      orderBy: { created_at: 'asc' },
+    });
+    res.json(history);
+  } catch (_err) {
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

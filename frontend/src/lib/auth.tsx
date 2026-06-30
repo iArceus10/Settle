@@ -1,6 +1,7 @@
 'use client';
 import React, { createContext, useContext, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { db } from './db';
 
 interface User {
   id: string;
@@ -19,32 +20,36 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window === 'undefined') return null;
-    const storedUser = localStorage.getItem('user');
+    const storedUser = localStorage.getItem('settle_user');
     if (!storedUser) return null;
     try {
       return JSON.parse(storedUser) as User;
     } catch {
-      localStorage.removeItem('user');
+      localStorage.removeItem('settle_user');
       return null;
     }
   });
   const [token, setToken] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('token');
+    return localStorage.getItem('settle_token');
   });
   const router = useRouter();
 
   const login = (newToken: string, newUser: User) => {
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
+    // Clear any stale data from a previous session before storing the new one
+    void db.delete().then(() => db.open());
+    localStorage.setItem('settle_token', newToken);
+    localStorage.setItem('settle_user', JSON.stringify(newUser));
     setToken(newToken);
     setUser(newUser);
     router.push('/');
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    // Clear ALL local Dexie data so stale data never bleeds between sessions
+    void db.delete().then(() => db.open());
+    localStorage.removeItem('settle_token');
+    localStorage.removeItem('settle_user');
     setToken(null);
     setUser(null);
     router.push('/login');

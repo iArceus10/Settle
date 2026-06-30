@@ -20,8 +20,9 @@ model Group {
   name       String
   created_at DateTime  @default(now())
 
-  members    Member[]
-  expenses   Expense[]
+  members     Member[]
+  expenses    Expense[]
+  settlements Settlement[]
 }
 
 model Member {
@@ -33,13 +34,15 @@ model Member {
   user       User      @relation(fields: [user_id], references: [id])
   group      Group     @relation(fields: [group_id], references: [id])
   
-  paid_expenses Expense[]             @relation("PaidBy")
-  splits        ExpenseSplit[]
-  confirmations ExpenseConfirmation[]
+  paid_expenses        Expense[]             @relation("PaidBy")
+  splits               ExpenseSplit[]
+  confirmations        ExpenseConfirmation[]
+  settlements_from     Settlement[]          @relation("SettlementFrom")
+  settlements_to       Settlement[]          @relation("SettlementTo")
 }
 
 model Expense {
-  id                    String   @id @default(uuid()) // Client-side generated
+  id                    String   @id @default(uuid())
   group_id              String
   paid_by               String
   amount                Decimal  @db.Decimal(10, 2)
@@ -48,13 +51,13 @@ model Expense {
   origin_device         String?
   supersedes_expense_id String?  @unique
 
-  group                 Group                 @relation(fields: [group_id], references: [id])
-  payer                 Member                @relation("PaidBy", fields: [paid_by], references: [id])
-  superseded_by         Expense?              @relation("Supersedes", fields: [supersedes_expense_id], references: [id])
-  supersedes            Expense?              @relation("Supersedes")
+  group         Group                 @relation(fields: [group_id], references: [id])
+  payer         Member                @relation("PaidBy", fields: [paid_by], references: [id])
+  superseded_by Expense?              @relation("Supersedes", fields: [supersedes_expense_id], references: [id])
+  supersedes    Expense?              @relation("Supersedes")
 
-  splits                ExpenseSplit[]
-  confirmations         ExpenseConfirmation[]
+  splits        ExpenseSplit[]
+  confirmations ExpenseConfirmation[]
 }
 
 model ExpenseSplit {
@@ -71,9 +74,23 @@ model ExpenseConfirmation {
   id           String    @id @default(uuid())
   expense_id   String
   member_id    String
-  status       String    @default("pending") // "pending" | "confirmed" | "disputed"
+  status       String    @default("pending")
   created_at   DateTime  @default(now())
 
   expense      Expense   @relation(fields: [expense_id], references: [id])
   member       Member    @relation(fields: [member_id], references: [id])
+}
+
+// Immutable payment record — INSERT only, never UPDATE/DELETE
+model Settlement {
+  id             String   @id @default(uuid())
+  group_id       String
+  from_member_id String
+  to_member_id   String
+  amount         Decimal  @db.Decimal(10, 2)
+  created_at     DateTime @default(now())
+
+  group          Group    @relation(fields: [group_id], references: [id])
+  from_member    Member   @relation("SettlementFrom", fields: [from_member_id], references: [id])
+  to_member      Member   @relation("SettlementTo", fields: [to_member_id], references: [id])
 }
